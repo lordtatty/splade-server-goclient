@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package splade;
+
+// Specify the Go package option
+option go_package = "./pb";
+
+service EmbeddingService {
+    rpc GetEmbedding (TextRequest) returns (EmbeddingResponse);
+    rpc GetTokenEmbedding (TextRequest) returns (TokenEmbeddingResponse);
+}
+
+message TextRequest {
+    string text = 1;
+}
+
+message EmbeddingResponse {
+    map<uint32, float> embedding = 1;
+}
+
+message TokenEmbeddingResponse {
+    map<string, float> embedding = 1;
+}
