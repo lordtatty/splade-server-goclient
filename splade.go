@@ -2,6 +2,8 @@ package splade
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"log"
 	"sync"
@@ -10,6 +12,7 @@ import (
 	"github.com/lordtatty/splade-server-goclient/pb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
 )
 
@@ -96,16 +99,41 @@ type SpladeClient struct {
 	serverAddr   string
 	mu           sync.Mutex
 	isConnecting bool
+	insecure     bool
 }
 
 // NewSpladeClient creates a new SpladeClient and attempts to connect to the gRPC server
-func NewSpladeClient(serverAddr string) (*SpladeClient, error) {
-	sc := &SpladeClient{serverAddr: serverAddr}
+func NewSpladeClient(serverAddr string, insecure bool) (*SpladeClient, error) {
+	sc := &SpladeClient{serverAddr: serverAddr, insecure: insecure}
 	err := sc.connect()
 	if err != nil {
 		return nil, err
 	}
 	return sc, nil
+}
+
+func newConn(host string, insecure bool) (*grpc.ClientConn, error) {
+	var opts []grpc.DialOption
+	if host != "" {
+		opts = append(opts, grpc.WithAuthority(host))
+	}
+
+	if insecure {
+		opts = append(opts, grpc.WithInsecure())
+	} else {
+		// Note: On the Windows platform, use of x509.SystemCertPool() requires
+		// go version 1.18 or higher.
+		systemRoots, err := x509.SystemCertPool()
+		if err != nil {
+			return nil, err
+		}
+		cred := credentials.NewTLS(&tls.Config{
+			RootCAs: systemRoots,
+		})
+		opts = append(opts, grpc.WithTransportCredentials(cred))
+	}
+
+	return grpc.Dial(host, opts...)
 }
 
 // connect establishes a connection to the gRPC server
@@ -121,15 +149,9 @@ func (sc *SpladeClient) connect() error {
 	defer func() { sc.isConnecting = false }()
 
 	// Set up a connection to the gRPC server with backoff options for reconnection
-	conn, err := grpc.Dial(
-		sc.serverAddr,
-		grpc.WithInsecure(),
-		grpc.WithBlock(),
-		grpc.WithBackoffMaxDelay(time.Second*5), // Maximum delay for reconnection attempts
-		grpc.WithReturnConnectionError(),        // Return error if connection fails
-	)
+	conn, err := newConn(sc.serverAddr, sc.insecure)
 	if err != nil {
-		return err
+		log.Fatalf("Failed to connect: %v", err)
 	}
 
 	sc.conn = conn
